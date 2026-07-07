@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Real-Time Face Recognition</title>
+  <style>
+    body {
+      background-color: #000;
+      color: #f0f0f0;
+      font-family: 'Arial', sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      min-height: 100vh;
+      margin: 0;
+      padding: 40px;
+    }
+    h1 {
+      font-size: 2rem;
+      margin-bottom: 30px;
+      letter-spacing: 1px;
+      color: #ffffff;
+    }
+    #output {
+      border: 2px solid #444;
+      border-radius: 10px;
+      box-shadow: 0 0 20px rgba(255, 255, 255, 0.2);
+      width: 640px;
+      height: 480px;
+      object-fit: cover;
+      background: #111;
+    }
+    #output:hover {
+      box-shadow: 0 0 30px rgba(255, 255, 255, 0.4);
+      transition: 0.3s ease-in-out;
+    }
+    #status {
+      margin-top: 14px;
+      font-size: 0.85rem;
+      color: #888;
+      letter-spacing: 0.5px;
+    }
+    #capture-canvas { display: none; }
+  </style>
+</head>
+<body>
+  <h1>Argus Demo</h1>
+  <img id="output" alt="Annotated Video Feed">
+  <p id="status">Connecting…</p>
+
+  <video id="source-video" autoplay playsinline muted style="display:none;"></video>
+  <canvas id="capture-canvas" width="640" height="480"></canvas>
+
+  <!-- Socket.IO client from CDN - version must match flask-socketio's engine -->
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <script>
+    const video  = document.getElementById('source-video');
+    const canvas = document.getElementById('capture-canvas');
+    const output = document.getElementById('output');
+    const status = document.getElementById('status');
+    const ctx    = canvas.getContext('2d');
+
+    const JPEG_QUALITY = 0.75;  // 0–1  quality vs. bandwidth trade-off
+
+    // ── Socket setup ──────────────────────────────────────────────────────────
+    const socket = io({ transports: ['websocket'] }); // skip long-polling upgrade
+
+    socket.on('connect',    () => status.textContent = 'Connected – starting camera…');
+    socket.on('disconnect', () => status.textContent = 'Disconnected.');
+
+    // Server pushes back an annotated JPEG as a binary Blob
+    socket.on('processed_frame', (data) => {
+      const blob      = new Blob([data], { type: 'image/jpeg' });
+      const objectUrl = URL.createObjectURL(blob);
+      const oldSrc    = output.src;
+      output.src      = objectUrl;
+      if (oldSrc && oldSrc.startsWith('blob:')) URL.revokeObjectURL(oldSrc);
+
+      // Ready for the next frame as soon as this one is displayed
+      requestAnimationFrame(sendFrame);
+    });
+
+    // ── Camera setup ──────────────────────────────────────────────────────────
+async function startCamera() {
+  try {
+    console.log("Requesting camera…");
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { width: 640, height: 480 },
+      audio: false
+    });
+    console.log("Camera stream acquired", stream);
+    video.srcObject = stream;
+    video.addEventListener('loadedmetadata', () => {
+      status.textContent = 'Camera active – streaming…';
+      sendFrame();
+    });
+  } catch (err) {
+    console.error("Camera error:", err);
+    status.textContent = `Camera error: ${err.message}`;
+  }
+}
+
+    // ── Frame loop ────────────────────────────────────────────────────────────
+    // No setInterval / isProcessing flag needed:
+    // we only send the next frame *after* the server replies (back-pressure).
+    function sendFrame() {
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      canvas.toBlob((blob) => {
+        if (!blob) return;
+        blob.arrayBuffer().then(buf => socket.emit('frame', buf));
+      }, 'image/jpeg', JPEG_QUALITY);
+    }
+
+    startCamera();
+  </script>
+</body>
+</html>

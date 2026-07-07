@@ -1,0 +1,7 @@
+eventlet~=0.40.0
+opencv-python-headless
+numpy~=1.26.4
+flask~=3.0.3
+flask-socketio~=5.5.1
+insightface~=0.7.3
+onnxruntime
